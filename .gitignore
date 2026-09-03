@@ -5,3 +5,9 @@ taxi.*
 datafusion_commands.txt
 benchmarks.md
 .idea
+
+# ProgramBench course-competition artifacts
+executable
+.programbench/venv/
+.programbench/tests/
+.programbench/run/
