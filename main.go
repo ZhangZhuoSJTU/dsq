@@ -87,6 +87,69 @@ func rewriteQuery(query string, resolveDM_getPanelToId *map[string]string) strin
 	return query
 }
 
+// formatScalar renders a single primitive cell value the way the pretty
+// table printer expects it: strings verbatim, other primitives via Go's
+// value syntax, and anything else as compact JSON.
+func formatScalar(v any) string {
+	switch t := v.(type) {
+	case string:
+		return t
+	case bool, byte, complex64, complex128, error, float32, float64,
+		int, int8, int16, int32, int64,
+		uint, uint16, uint32, uint64, uintptr:
+		return fmt.Sprintf("%#v", t)
+	default:
+		cellBytes, _ := json.Marshal(t)
+		return string(cellBytes)
+	}
+}
+
+// inlineListLimit is the largest flat array printed in full before the pretty
+// table abbreviates it to keep rows readable.
+const inlineListLimit = 8
+
+// formatList renders a JSON array cell for the pretty table. The head element
+// decides the layout: arrays that lead with a nested object or array are always
+// marshalled in full, short flat arrays are shown inline, and longer flat
+// arrays are abbreviated to their leading elements plus a "+N more" marker.
+func formatList(items []any) string {
+	switch items[0].(type) {
+	case map[string]any, []any:
+		cellBytes, _ := json.Marshal(items)
+		return string(cellBytes)
+	}
+
+	if len(items) <= inlineListLimit {
+		cellBytes, _ := json.Marshal(items)
+		return string(cellBytes)
+	}
+
+	shown := make([]string, inlineListLimit)
+	for i := range shown {
+		shown[i] = formatScalar(items[i])
+	}
+	return fmt.Sprintf("[%s, … +%d more]", strings.Join(shown, ", "), len(items)-inlineListLimit)
+}
+
+// formatCell renders any decoded JSON value for a pretty-printed table cell.
+func formatCell(v any) string {
+	if items, ok := v.([]any); ok {
+		return formatList(items)
+	}
+	return formatScalar(v)
+}
+
+// objectColumns returns the sorted set of field names for an array-of-objects
+// shape; these become the pretty table's header columns.
+func objectColumns(s *runner.Shape) []string {
+	var columns []string
+	for name := range s.ArrayShape.Children.ObjectShape.Children {
+		columns = append(columns, name)
+	}
+	sort.Strings(columns)
+	return columns
+}
+
 func dumpJSONFile(file string, pretty bool, schema bool) error {
 	fd, err := os.Open(file)
 	if err != nil {
@@ -133,11 +196,7 @@ func dumpJSONFile(file string, pretty bool, schema bool) error {
 		if err != nil {
 			return err
 		}
-		var columns []string
-		for name := range s.ArrayShape.Children.ObjectShape.Children {
-			columns = append(columns, name)
-		}
-		sort.Strings(columns)
+		columns := objectColumns(s)
 
 		table := tablewriter.NewWriter(os.Stdout)
 		table.SetHeader(columns)
@@ -149,22 +208,10 @@ func dumpJSONFile(file string, pretty bool, schema bool) error {
 			return err
 		}
 
-		for _, objRow := range rows {
-			var row []string
+		for _, record := range rows {
+			row := make([]string, 0, len(columns))
 			for _, column := range columns {
-				var cell string
-				switch t := objRow[column].(type) {
-				case bool, byte, complex64, complex128, error, float32, float64,
-					int, int8, int16, int32, int64,
-					uint, uint16, uint32, uint64, uintptr:
-					cell = fmt.Sprintf("%#v", t)
-				case string:
-					cell = t
-				default:
-					cellBytes, _ := json.Marshal(t)
-					cell = string(cellBytes)
-				}
-				row = append(row, cell)
+				row = append(row, formatCell(record[column]))
 			}
 			table.Append(row)
 		}

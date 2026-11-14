@@ -48,6 +48,19 @@ func (sw *SQLiteResultItemWriter) createTable() error {
 	return err
 }
 
+// writeRowPlaceholders appends a single "(?, ?, ...)" group with one
+// placeholder per field to the statement being built.
+func (sw *SQLiteResultItemWriter) writeRowPlaceholders(query *strings.Builder) {
+	query.WriteByte('(')
+	for i := range sw.fields {
+		if i > 0 {
+			query.WriteString(", ")
+		}
+		query.WriteByte('?')
+	}
+	query.WriteByte(')')
+}
+
 func (sw *SQLiteResultItemWriter) makeQuery(rows int) string {
 	var query strings.Builder
 	query.WriteString("INSERT INTO \"" + sw.panelId + "\" VALUES ")
@@ -56,14 +69,7 @@ func (sw *SQLiteResultItemWriter) makeQuery(rows int) string {
 			query.WriteString(", ")
 		}
 
-		query.WriteByte('(')
-		for i := range sw.fields {
-			if i > 0 {
-				query.WriteString(", ")
-			}
-			query.WriteByte('?')
-		}
-		query.WriteByte(')')
+		sw.writeRowPlaceholders(&query)
 	}
 
 	return query.String()
